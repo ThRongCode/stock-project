@@ -25,7 +25,7 @@ export const testHNXListDataAPI = async (date = new Date()) => {
       'pColOrder': 'col_a',
       'pOrderType': 'ASC',
       'pCurrentPage': '1',
-      'pRecordOnPage': '50', // Get more records for testing
+      'pRecordOnPage': '1000', // Get all available stocks instead of just 50
       'pIsSearch': '1'
     });
 

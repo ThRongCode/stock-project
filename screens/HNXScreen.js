@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, Alert, Platform, ActivityIndicator, FlatList } from 'react-native';
+import React, { useState, useMemo, useCallback } from 'react';
+import { StyleSheet, Text, View, TouchableOpacity, Alert, Platform, ActivityIndicator, FlatList, TextInput } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { testHNXListDataAPI, fetchHNXStockData, formatDateForHNX } from '../services/hnxService';
@@ -13,6 +13,7 @@ export default function HNXScreen() {
   const [loading, setLoading] = useState(false);
   const [stockData, setStockData] = useState([]);
   const [apiTestResult, setApiTestResult] = useState(null);
+  const [searchText, setSearchText] = useState('');
 
   const onStartDateChange = (event, selectedDate) => {
     const currentDate = selectedDate || startDate;
@@ -58,23 +59,33 @@ export default function HNXScreen() {
 
     setLoading(true);
     try {
-      console.log('Fetching HNX stock data...');
+      console.log('Fetching HNX stock comparison data...');
       
-      // For now, just fetch one date to test parsing
-      const startDateData = await fetchHNXStockData(startDate);
+      // Fetch data for both dates like HOSE does
+      const [startDateData, endDateData] = await Promise.all([
+        fetchHNXStockData(startDate),
+        fetchHNXStockData(endDate),
+      ]);
       
       console.log('📊 Fetched HNX data:', {
-        source: startDateData.source,
-        date: startDateData.date,
-        stockCount: startDateData.data.length,
-        htmlLength: startDateData.htmlLength
+        startDate: startDateData.date,
+        endDate: endDateData.date,
+        startStockCount: startDateData.data.length,
+        endStockCount: endDateData.data.length,
+        startSource: startDateData.source,
+        endSource: endDateData.source
       });
 
-      setStockData(startDateData.data);
+      // Combine and calculate percentage changes
+      const combinedData = combineStockData(startDateData.data, endDateData.data);
+      setStockData(combinedData);
+      
+      // Reset search when new data is fetched
+      setSearchText('');
       
       Alert.alert(
-        'Data Fetched! 📊', 
-        `Successfully parsed ${startDateData.data.length} stocks from HNX\n\nDate: ${startDateData.date}\nSource: ${startDateData.source}`
+        'HNX Comparison Complete! 📊', 
+        `Successfully compared ${combinedData.length} stocks\n\nStart: ${startDateData.date} (${startDateData.data.length} stocks)\nEnd: ${endDateData.date} (${endDateData.data.length} stocks)`
       );
     } catch (error) {
       Alert.alert('Error', 'Failed to fetch HNX stock data: ' + error.message);
@@ -84,25 +95,99 @@ export default function HNXScreen() {
     }
   };
 
+  const combineStockData = (startData, endData) => {
+    console.log('🔄 Combining HNX stock data for comparison...');
+    const result = [];
+    
+    // Create a map of end data for quick lookup
+    const endDataMap = {};
+    endData.forEach(stock => {
+      endDataMap[stock.securitySymbol] = stock;
+    });
+
+    // Combine data for stocks present in both datasets
+    startData.forEach(startStock => {
+      const endStock = endDataMap[startStock.securitySymbol];
+      if (endStock) {
+        const startPrice = parseFloat(startStock.closePrice) || 0;
+        const endPrice = parseFloat(endStock.closePrice) || 0;
+        const changePercent = calculatePercentageChange(startPrice, endPrice);
+        
+        result.push({
+          securitySymbol: startStock.securitySymbol,
+          startPrice: startPrice.toFixed(2),
+          endPrice: endPrice.toFixed(2),
+          changePercent: parseFloat(changePercent),
+          changePercentFormatted: `${changePercent > 0 ? '+' : ''}${changePercent}%`,
+          // Keep original data for debugging
+          startData: startStock,
+          endData: endStock,
+          // Additional derived data
+          priceChange: (endPrice - startPrice).toFixed(2),
+          isPositive: parseFloat(changePercent) >= 0
+        });
+      }
+    });
+
+    // Sort by stock symbol alphabetically (A-Z)
+    result.sort((a, b) => a.securitySymbol.localeCompare(b.securitySymbol));
+
+    console.log(`📈 Successfully combined ${result.length} stocks for comparison`);
+    console.log('📋 Sample stocks:', result.slice(0, 3).map(s => 
+      `${s.securitySymbol}: ${s.changePercentFormatted}`
+    ));
+
+    return result;
+  };
+
+  // Filter stocks based on search text
+  const filteredStockData = useMemo(() => {
+    if (!searchText.trim()) {
+      return stockData;
+    }
+    
+    return stockData.filter(stock => {
+      const stockName = stock.securitySymbol.toLowerCase();
+      return stockName.includes(searchText.toLowerCase());
+    });
+  }, [stockData, searchText]);
+
+  const handleSearchTextChange = useCallback((text) => {
+    setSearchText(text);
+  }, []);
+
   const renderStockItem = ({ item, index }) => (
     <View style={[styles.stockItem, index % 2 === 0 ? styles.evenItem : styles.oddItem]}>
       <View style={styles.stockHeader}>
         <Text style={styles.stockSymbol}>{item.securitySymbol}</Text>
-        <Text style={styles.stockPrice}>{parseFloat(item.closePrice || 0).toFixed(2)}</Text>
+        <Text style={[
+          styles.changePercent, 
+          { color: item.isPositive ? '#10B981' : '#EF4444' }
+        ]}>
+          {item.changePercentFormatted}
+        </Text>
       </View>
       
       <View style={styles.stockDetails}>
-        <Text style={styles.stockDetailText}>
-          O: {parseFloat(item.openPrice || 0).toFixed(2)} • 
-          H: {parseFloat(item.highPrice || 0).toFixed(2)} • 
-          L: {parseFloat(item.lowPrice || 0).toFixed(2)}
-        </Text>
+        <View style={styles.priceRow}>
+          <Text style={styles.priceLabel}>Start Price:</Text>
+          <Text style={styles.priceValue}>{item.startPrice}</Text>
+        </View>
         
-        {item.allCells && (
-          <Text style={styles.debugText} numberOfLines={1}>
-            Cells: {item.cellCount} | {item.allCells.slice(0, 4).join(' | ')}
+        <View style={styles.priceRow}>
+          <Text style={styles.priceLabel}>End Price:</Text>
+          <Text style={styles.priceValue}>{item.endPrice}</Text>
+        </View>
+        
+        <View style={styles.priceRow}>
+          <Text style={styles.priceLabel}>Price Change:</Text>
+          <Text style={[
+            styles.priceValue, 
+            { color: item.isPositive ? '#10B981' : '#EF4444' }
+          ]}>
+            {item.isPositive ? '+' : ''}{item.priceChange}
           </Text>
-        )}
+        </View>
       </View>
     </View>
   );
@@ -110,8 +195,8 @@ export default function HNXScreen() {
   const ListHeaderComponent = () => (
     <View style={styles.headerContainer}>
       <View style={styles.header}>
-        <Text style={styles.title}>HNX Stock Data</Text>
-        <Text style={styles.subtitle}>🏛️ Real-time Parsing</Text>
+        <Text style={styles.title}>HNX Stock Comparison</Text>
+        <Text style={styles.subtitle}>🏛️ Two-Date Analysis</Text>
       </View>
 
       {/* Date Pickers */}
@@ -161,6 +246,17 @@ export default function HNXScreen() {
         </View>
       </View>
 
+      {/* Search Input */}
+      <View style={styles.searchContainer}>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Filter stocks by symbol (e.g., AAV, VNM, BVS...)"
+          value={searchText}
+          onChangeText={handleSearchTextChange}
+          placeholderTextColor="#999"
+        />
+      </View>
+
       {/* Action buttons */}
       <View style={styles.buttonContainer}>
         <TouchableOpacity
@@ -183,7 +279,7 @@ export default function HNXScreen() {
           {loading ? (
             <ActivityIndicator color="white" size="small" />
           ) : (
-            <Text style={styles.buttonText}>📊 Parse HNX Stock Data</Text>
+            <Text style={styles.buttonText}>📊 Compare HNX Stocks</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -211,10 +307,11 @@ export default function HNXScreen() {
       {stockData.length > 0 && (
         <View style={styles.stockDataHeader}>
           <Text style={styles.stockDataTitle}>
-            📊 Parsed Stocks ({stockData.length})
+            📊 Stock Comparison Results ({filteredStockData.length}
+            {searchText ? ` of ${stockData.length}` : ''})
           </Text>
           <Text style={styles.stockDataSubtitle}>
-            O = Open • H = High • L = Low
+            Sorted alphabetically by stock symbol (A-Z)
           </Text>
         </View>
       )}
@@ -226,7 +323,7 @@ export default function HNXScreen() {
       <StatusBar style="auto" />
       
       <FlatList
-        data={stockData}
+        data={filteredStockData}
         renderItem={renderStockItem}
         keyExtractor={(item, index) => `${item.securitySymbol}-${index}`}
         ListHeaderComponent={ListHeaderComponent}
@@ -234,16 +331,26 @@ export default function HNXScreen() {
           !loading && stockData.length === 0 ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>
-                📋 No stock data yet
+                📋 No comparison data yet
               </Text>
               <Text style={styles.emptySubtext}>
-                Tap "Parse HNX Stock Data" to load real HNX data
+                Select two dates and tap "Compare HNX Stocks" to see price changes
+              </Text>
+            </View>
+          ) : searchText && filteredStockData.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>
+                🔍 No stocks found
+              </Text>
+              <Text style={styles.emptySubtext}>
+                No stocks match "{searchText}". Try a different search term.
               </Text>
             </View>
           ) : null
         }
         contentContainerStyle={styles.flatListContent}
         showsVerticalScrollIndicator={true}
+        keyboardShouldPersistTaps="handled"
       />
     </View>
   );
@@ -420,5 +527,38 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     textAlign: 'center',
     lineHeight: 20,
+  },
+  changePercent: {
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  priceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  priceLabel: {
+    fontSize: 14,
+    color: '#555',
+    fontWeight: '500',
+  },
+  priceValue: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  searchContainer: {
+    marginHorizontal: 20,
+    marginBottom: 15,
+    backgroundColor: 'white',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+  },
+  searchInput: {
+    fontSize: 16,
+    color: '#333',
   },
 }); 
