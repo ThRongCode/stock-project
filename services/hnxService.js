@@ -14,7 +14,6 @@ export const formatDateForHNX = (date) => {
 export const testHNXListDataAPI = async (date = new Date()) => {
   try {
     const formattedDate = formatDateForHNX(date);
-    console.log('🔍 Testing HNX ListData_Listed API for date:', formattedDate);
     
     // Construct the form data based on the curl command
     // Pattern: date|0|-1|-1|0|date
@@ -29,8 +28,6 @@ export const testHNXListDataAPI = async (date = new Date()) => {
       'pIsSearch': '1'
     });
 
-    console.log('📤 Form data:', formData.toString());
-    
     const response = await fetch('https://hnx.vn/ModuleReportStockETFs/Report_MD_PriceVolatilyti/ListData_Listed', {
       method: 'POST',
       headers: {
@@ -45,18 +42,12 @@ export const testHNXListDataAPI = async (date = new Date()) => {
       body: formData.toString()
     });
 
-    console.log('📡 Response status:', response.status);
-    console.log('📡 Response headers:', response.headers);
-
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('❌ Error response:', errorText);
       throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
     }
 
     const htmlData = await response.text();
-    console.log('✅ HNX ListData response length:', htmlData.length);
-    console.log('📄 Response preview (first 500 chars):', htmlData.substring(0, 500));
     
     // Check if it contains expected HTML structure
     const hasTable = htmlData.includes('<table') || htmlData.includes('divContainTable');
@@ -83,14 +74,11 @@ export const testHNXListDataAPI = async (date = new Date()) => {
 
 // Legacy function - keep for backwards compatibility but mark as deprecated
 export const testHNXConnection = async () => {
-  console.log('⚠️ testHNXConnection is deprecated. Use testHNXListDataAPI instead.');
   return await testHNXListDataAPI();
 };
 
 // Parse HTML response and extract stock data (basic implementation)
 const parseHNXStockData = (htmlText) => {
-  console.log('🔍 Parsing HNX HTML data...');
-  
   try {
     // Find all table rows in the tbody section
     const tableRowRegex = /<tr[^>]*>(.*?)<\/tr>/gs;
@@ -159,13 +147,6 @@ const parseHNXStockData = (htmlText) => {
       }
     }
     
-    console.log(`📊 Successfully parsed ${stocks.length} stocks from HTML`);
-    
-    // Log first few stocks for debugging
-    if (stocks.length > 0) {
-      console.log('📋 First 3 parsed stocks:', stocks.slice(0, 3));
-    }
-    
     return stocks;
     
   } catch (error) {
@@ -178,8 +159,6 @@ const parseHNXStockData = (htmlText) => {
       !line.includes('<th') &&
       line.trim().length > 0
     );
-    
-    console.log(`📊 Fallback: Found ${dataLines.length} table cell lines`);
     
     // Return a simple test stock for debugging
     return [
@@ -200,8 +179,6 @@ const parseHNXStockData = (htmlText) => {
 // Fetch HNX stock data using the ListData_Listed API
 export const fetchHNXStockData = async (date) => {
   try {
-    console.log(`📊 Fetching HNX stock data for: ${formatDateForHNX(date)}`);
-    
     const result = await testHNXListDataAPI(date);
     
     if (!result.success) {

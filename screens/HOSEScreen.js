@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
@@ -16,7 +16,7 @@ import {
 import { PinchGestureHandler, TapGestureHandler, PanGestureHandler, State, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { fetchStockData, formatDateForAPI, calculatePercentageChange } from '../services/stockService';
+import { fetchStockData, formatDateForAPI, calculatePercentageChange, fetchHSXCompanyInfo } from '../services/stockService';
 
 export default function HOSEScreen() {
   const [startDate, setStartDate] = useState(new Date(2025, 6, 24)); // July 24, 2025
@@ -29,6 +29,10 @@ export default function HOSEScreen() {
   const [sortDirection, setSortDirection] = useState('asc'); // 'asc' or 'desc'
   const [searchText, setSearchText] = useState('');
   
+  // Company info state
+  const [companyMap, setCompanyMap] = useState({});
+  const [companyInfoLoading, setCompanyInfoLoading] = useState(false);
+  
   // Zoom and pan functionality
   const scale = useRef(new Animated.Value(1)).current;
   const translateX = useRef(new Animated.Value(0)).current;
@@ -37,6 +41,51 @@ export default function HOSEScreen() {
   const pinchRef = useRef();
   const panRef = useRef();
   const doubleTapRef = useRef();
+
+  // Fetch company information when screen loads
+  useEffect(() => {
+    const loadCompanyInfo = async () => {
+      setCompanyInfoLoading(true);
+      try {
+        const result = await fetchHSXCompanyInfo();
+        
+        if (result.success) {
+          setCompanyMap(result.companyMap);
+          
+          // Debug MSB specifically
+          if (result.companyMap['MSB']) {
+            console.log('🔍 MSB found in company map:', result.companyMap['MSB']);
+          } else {
+            console.log('❌ MSB NOT found in company map');
+            console.log('🔍 Available company codes containing "MSB":', 
+              Object.keys(result.companyMap).filter(code => code.includes('MSB'))
+            );
+          }
+        }
+      } catch (error) {
+        console.error('🏢 Error loading company info:', error);
+      } finally {
+        setCompanyInfoLoading(false);
+      }
+    };
+
+    loadCompanyInfo();
+  }, []);
+
+  // Helper function to get company name from the map
+  const getCompanyName = useCallback((stockCode) => {
+    const company = companyMap[stockCode];
+    if (company && company.fullName) {
+      return company.fullName; // Use fullName (Vietnamese company name)
+    }
+    return stockCode; // Fallback to stock code if no company name found
+  }, [companyMap]);
+
+  // Helper function to check if company data is available
+  const hasCompanyData = useCallback((stockCode) => {
+    const company = companyMap[stockCode];
+    return company && company.fullName && company.fullName !== stockCode;
+  }, [companyMap]);
 
   const onStartDateChange = (event, selectedDate) => {
     const currentDate = selectedDate || startDate;
@@ -93,21 +142,43 @@ export default function HOSEScreen() {
     });
 
     // Combine data for stocks present in both datasets
-    startData.forEach(startStock => {
+    startData.forEach((startStock, index) => {
       const endStock = endDataMap[startStock.securitySymbol];
       if (endStock) {
         const startPrice = parseFloat(startStock.closePrice);
         const endPrice = parseFloat(endStock.closePrice);
         const changePercent = calculatePercentageChange(startPrice, endPrice);
         
+        // Get company name with improved fallback logic
+        const companyName = getCompanyName(startStock.securitySymbol);
+        const displayCompanyName = (companyName && companyName !== startStock.securitySymbol) ? companyName : '';
+        
+        // Debug MSB specifically
+        if (startStock.securitySymbol === 'MSB') {
+          console.log('🔍 MSB debugging during comparison:', {
+            stockCode: startStock.securitySymbol,
+            rawCompanyName: companyName,
+            displayCompanyName,
+            companyMapHasMSB: !!companyMap['MSB'],
+            companyMapMSB: companyMap['MSB'] || 'NOT FOUND',
+            isCompanyMapEmpty: Object.keys(companyMap).length === 0,
+            conditionCheck: {
+              hasCompanyName: !!companyName,
+              companyNameNotEqualToStockCode: companyName !== startStock.securitySymbol,
+              fullCondition: !!(companyName && companyName !== startStock.securitySymbol)
+            }
+          });
+        }
+        
         result.push([
-          startStock.securitySymbol, // Stock Name
+          startStock.securitySymbol, // Stock Code
           {
             value: `${changePercent}%`, // Changes
             color: parseFloat(changePercent) >= 0 ? '#4CAF50' : '#F44336'
           },
           startPrice.toFixed(2), // Start Date Close Price
           endPrice.toFixed(2), // End Date Close Price
+          displayCompanyName // Company Name (new column)
         ]);
       }
     });
@@ -134,8 +205,12 @@ export default function HOSEScreen() {
     }
     
     return stockData.filter(row => {
-      const stockName = row[0].toLowerCase(); // Stock name is in the first column
-      return stockName.includes(searchText.toLowerCase());
+      const stockCode = row[0].toLowerCase(); // Stock code is in the first column
+      const companyName = (row[4] || '').toLowerCase(); // Company name is in the fifth column
+      const searchTerm = searchText.toLowerCase();
+      
+      // Search in both stock code and company name
+      return stockCode.includes(searchTerm) || companyName.includes(searchTerm);
     });
   }, [stockData, searchText]);
 
@@ -149,7 +224,7 @@ export default function HOSEScreen() {
       
       switch (sortColumn) {
         case 'stockName':
-          aValue = a[0]; // Stock Name
+          aValue = a[0]; // Stock Code
           bValue = b[0];
           break;
         case 'changes':
@@ -165,12 +240,16 @@ export default function HOSEScreen() {
           aValue = parseFloat(a[3]); // End Price
           bValue = parseFloat(b[3]);
           break;
+        case 'companyName':
+          aValue = a[4] || ''; // Company Name
+          bValue = b[4] || '';
+          break;
         default:
           return 0;
       }
 
-      if (sortColumn === 'stockName') {
-        // String comparison for stock names
+      if (sortColumn === 'stockName' || sortColumn === 'companyName') {
+        // String comparison for stock names and company names
         if (sortDirection === 'asc') {
           return aValue.localeCompare(bValue);
         } else {
@@ -187,19 +266,20 @@ export default function HOSEScreen() {
     });
   }, [filteredData, sortColumn, sortDirection]);
 
-  // Memoize responsive column widths
+  // Memoize responsive column widths (updated for 5 columns)
   const tableColumnWidths = useMemo(() => {
     const screenWidth = Dimensions.get('window').width;
     return [
-      screenWidth * 0.25, // Stock Name - 25%
-      screenWidth * 0.25, // Changes - 25%
-      screenWidth * 0.25, // Start Price - 25%
-      screenWidth * 0.25, // End Price - 25%
+      screenWidth * 0.15, // Stock Code - 15%
+      screenWidth * 0.20, // Changes - 20%
+      screenWidth * 0.20, // Start Price - 20%
+      screenWidth * 0.20, // End Price - 20%
+      screenWidth * 0.25, // Company Name - 25%
     ];
   }, []);
 
   const getSortIcon = useCallback((columnIndex) => {
-    const columnNames = ['stockName', 'changes', 'startPrice', 'endPrice'];
+    const columnNames = ['stockName', 'changes', 'startPrice', 'endPrice', 'companyName'];
     const columnName = columnNames[columnIndex];
     
     if (sortColumn !== columnName) {
@@ -215,8 +295,7 @@ export default function HOSEScreen() {
 
   // Pan gesture handlers - Define lastPan BEFORE gesture handlers
   const lastPan = useRef({ x: 0, y: 0 });
-
-  // Zoom gesture handlers
+  
   const onPinchGestureEvent = useCallback((event) => {
     const { scale: newScale } = event.nativeEvent;
     // Limit zoom between 0.8x and 3x
@@ -279,7 +358,7 @@ export default function HOSEScreen() {
       ]).start();
     }
   }, [scale, translateX, translateY]);
-  
+    
   const onPanGestureEvent = useCallback((event) => {
     // Only allow panning when zoomed in
     if (currentScale <= 1.1) return;
@@ -324,7 +403,7 @@ export default function HOSEScreen() {
     }
   }, [translateX, translateY, currentScale]);
 
-  const tableHead = ['Stock Name', 'Changes (%)', 'Start Price', 'End Price'];
+  const tableHead = ['Stock Code', 'Changes (%)', 'Start Price', 'End Price', 'Company Name'];
   
   // Create table header component
   const TableHeader = useMemo(() => (
@@ -349,6 +428,19 @@ export default function HOSEScreen() {
     <View style={styles.listHeader}>
       <View style={styles.header}>
         <Text style={styles.title}>Stock Price Comparison</Text>
+        {companyInfoLoading && (
+          <View style={styles.companyLoadingIndicator}>
+            <ActivityIndicator size="small" color="#007AFF" />
+            <Text style={styles.companyLoadingText}>
+              Loading company names...
+            </Text>
+          </View>
+        )}
+        {!companyInfoLoading && Object.keys(companyMap).length > 0 && (
+          <Text style={styles.companyLoadedText}>
+            ✅ {Object.keys(companyMap).length} companies loaded
+          </Text>
+        )}
       </View>
 
       <View style={styles.datePickerContainer}>
@@ -401,7 +493,7 @@ export default function HOSEScreen() {
       <View style={styles.searchContainer}>
         <TextInput
           style={styles.searchInput}
-          placeholder="Filter stocks by name (e.g., AAA, VNM...)"
+          placeholder="Filter by stock code or company name (e.g., VCB, Vietcombank...)"
           value={searchText}
           onChangeText={handleSearchTextChange}
           placeholderTextColor="#999"
@@ -410,14 +502,29 @@ export default function HOSEScreen() {
 
       {/* Fetch Button */}
       <TouchableOpacity
-        style={styles.fetchButton}
+        style={[
+          styles.fetchButton, 
+          companyInfoLoading && styles.fetchButtonDisabled
+        ]}
         onPress={fetchStockComparison}
-        disabled={loading}
+        disabled={loading || companyInfoLoading}
       >
         {loading ? (
           <ActivityIndicator color="white" />
         ) : (
-          <Text style={styles.fetchButtonText}>Compare Stocks</Text>
+          <View style={styles.fetchButtonContent}>
+            <Text style={[
+              styles.fetchButtonText,
+              companyInfoLoading && styles.fetchButtonTextDisabled
+            ]}>
+              Compare Stocks
+            </Text>
+            {companyInfoLoading && (
+              <Text style={styles.fetchButtonSubtext}>
+                Loading company names...
+              </Text>
+            )}
+          </View>
         )}
       </TouchableOpacity>
 
@@ -438,12 +545,12 @@ export default function HOSEScreen() {
   ), [
     startDate, endDate, showStartPicker, showEndPicker, 
     searchText, loading, stockData.length, sortedAndFilteredData.length, 
-    currentScale, TableHeader
+    currentScale, TableHeader, companyInfoLoading, companyMap
   ]);
 
   // Regular row component (gestures will be at FlatList level)
   const SimpleTableRow = useCallback(({ item, index }) => {
-    if (!item || !Array.isArray(item) || item.length < 4) {
+    if (!item || !Array.isArray(item) || item.length < 5) {
       return null;
     }
 
@@ -466,6 +573,11 @@ export default function HOSEScreen() {
         <View style={[styles.tableCell, { width: tableColumnWidths[3] }]}>
           <Text style={styles.tableText}>{item[3] || ''}</Text>
         </View>
+        <View style={[styles.tableCell, { width: tableColumnWidths[4] }]}>
+          <Text style={styles.tableText} numberOfLines={2}>
+            {item[4] || ''}
+          </Text>
+        </View>
       </View>
     );
   }, [tableColumnWidths]);
@@ -473,69 +585,89 @@ export default function HOSEScreen() {
   return (
     <GestureHandlerRootView style={styles.container}>
       <StatusBar style="auto" />
-      <TapGestureHandler
-        ref={doubleTapRef}
-        onHandlerStateChange={onDoubleTap}
-        numberOfTaps={2}
-      >
-        <PanGestureHandler
-          ref={panRef}
-          onGestureEvent={onPanGestureEvent}
-          onHandlerStateChange={onPanStateChange}
-          simultaneousHandlers={[pinchRef, doubleTapRef]}
-          minPointers={1}
-          maxPointers={1}
-          enabled={currentScale > 1.1}
+      
+      {/* Full-screen loading overlay for company info */}
+      {companyInfoLoading && (
+        <View style={styles.loadingOverlay}>
+          <View style={styles.loadingContent}>
+            <ActivityIndicator size="large" color="#007AFF" />
+            <Text style={styles.loadingTitle}>Loading Company Information</Text>
+            <Text style={styles.loadingSubtitle}>
+              Fetching company names from HSX...
+            </Text>
+            <Text style={styles.loadingHint}>
+              Please wait, this will only take a moment
+            </Text>
+          </View>
+        </View>
+      )}
+      
+      {/* Main content - only show when company data is loaded */}
+      {!companyInfoLoading && (
+        <TapGestureHandler
+          ref={doubleTapRef}
+          onHandlerStateChange={onDoubleTap}
+          numberOfTaps={2}
         >
-          <PinchGestureHandler
-            ref={pinchRef}
-            onGestureEvent={onPinchGestureEvent}
-            onHandlerStateChange={onPinchStateChange}
-            simultaneousHandlers={[panRef, doubleTapRef]}
+          <PanGestureHandler
+            ref={panRef}
+            onGestureEvent={onPanGestureEvent}
+            onHandlerStateChange={onPanStateChange}
+            simultaneousHandlers={[pinchRef, doubleTapRef]}
+            minPointers={1}
+            maxPointers={1}
+            enabled={currentScale > 1.1}
           >
-            <Animated.View 
-              style={[
-                styles.mainFlatList,
-                {
-                  transform: [
-                    { translateX },
-                    { translateY },
-                    { scale }
-                  ]
-                }
-              ]}
+            <PinchGestureHandler
+              ref={pinchRef}
+              onGestureEvent={onPinchGestureEvent}
+              onHandlerStateChange={onPinchStateChange}
+              simultaneousHandlers={[panRef, doubleTapRef]}
             >
-              <FlatList
-                data={stockData.length > 0 ? sortedAndFilteredData : []}
-                renderItem={SimpleTableRow}
-                keyExtractor={(item, index) => `${item?.[0] || 'unknown'}-${index}`}
-                ListHeaderComponent={ListHeaderComponent}
-                ListEmptyComponent={!loading && stockData.length === 0 ? (
-                  <View style={styles.noDataContainer}>
-                    <Text style={styles.noDataText}>
-                      Select two dates and tap "Compare Stocks" to see results
-                    </Text>
-                  </View>
-                ) : null}
-                contentContainerStyle={styles.flatListContent}
-                getItemLayout={(data, index) => ({
-                  length: 35,
-                  offset: 35 * index,
-                  index,
-                })}
-                removeClippedSubviews={true}
-                maxToRenderPerBatch={20}
-                updateCellsBatchingPeriod={50}
-                initialNumToRender={20}
-                windowSize={10}
-                showsVerticalScrollIndicator={true}
-                scrollEnabled={currentScale <= 1.1}
-                keyboardShouldPersistTaps="handled"
-              />
-            </Animated.View>
-          </PinchGestureHandler>
-        </PanGestureHandler>
-      </TapGestureHandler>
+              <Animated.View 
+                style={[
+                  styles.mainFlatList,
+                  {
+                    transform: [
+                      { translateX },
+                      { translateY },
+                      { scale }
+                    ]
+                  }
+                ]}
+              >
+                <FlatList
+                  data={stockData.length > 0 ? sortedAndFilteredData : []}
+                  renderItem={SimpleTableRow}
+                  keyExtractor={(item, index) => `${item?.[0] || 'unknown'}-${index}`}
+                  ListHeaderComponent={ListHeaderComponent}
+                  ListEmptyComponent={!loading && stockData.length === 0 ? (
+                    <View style={styles.noDataContainer}>
+                      <Text style={styles.noDataText}>
+                        Select two dates and tap "Compare Stocks" to see results
+                      </Text>
+                    </View>
+                  ) : null}
+                  contentContainerStyle={styles.flatListContent}
+                  getItemLayout={(data, index) => ({
+                    length: 35,
+                    offset: 35 * index,
+                    index,
+                  })}
+                  removeClippedSubviews={true}
+                  maxToRenderPerBatch={20}
+                  updateCellsBatchingPeriod={50}
+                  initialNumToRender={20}
+                  windowSize={10}
+                  showsVerticalScrollIndicator={true}
+                  scrollEnabled={currentScale <= 1.1}
+                  keyboardShouldPersistTaps="handled"
+                />
+              </Animated.View>
+            </PinchGestureHandler>
+          </PanGestureHandler>
+        </TapGestureHandler>
+      )}
     </GestureHandlerRootView>
   );
 }
@@ -614,10 +746,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 15,
   },
+  fetchButtonContent: {
+    flexDirection: 'column',
+    alignItems: 'center',
+  },
   fetchButtonText: {
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
+  },
+  fetchButtonTextDisabled: {
+    color: '#999',
+  },
+  fetchButtonSubtext: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 5,
   },
   tableHeaderRow: {
     flexDirection: 'row',
@@ -700,5 +844,68 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
     lineHeight: 24,
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  loadingContent: {
+    backgroundColor: 'white',
+    borderRadius: 15,
+    padding: 30,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 5,
+    minWidth: 280,
+  },
+  loadingTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 15,
+    marginBottom: 10,
+  },
+  loadingSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  loadingHint: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  fetchButtonDisabled: {
+    opacity: 0.7,
+    backgroundColor: '#ccc',
+  },
+  companyLoadingIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 10,
+  },
+  companyLoadingText: {
+    marginLeft: 5,
+    fontSize: 14,
+    color: '#666',
+  },
+  companyLoadedText: {
+    marginTop: 10,
+    fontSize: 14,
+    color: '#4CAF50',
+    fontWeight: '600',
   },
 }); 
