@@ -4,7 +4,7 @@ import { createDrawerNavigator } from '@react-navigation/drawer';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import HOSEScreen from './screens/HOSEScreen';
-import BlankScreen from './screens/BlankScreen';
+import HNXScreen from './screens/HNXScreen';
 
 const Drawer = createDrawerNavigator();
 
@@ -45,7 +45,7 @@ export default function App() {
           />
           <Drawer.Screen 
             name="HNX" 
-            component={BlankScreen}
+            component={HNXScreen}
             options={{
               title: 'HNX Stock Comparison',
               drawerLabel: '🏛️ HNX (Development)',
