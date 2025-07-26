@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import {
   StyleSheet,
   Text,
@@ -11,7 +11,9 @@ import {
   Dimensions,
   TextInput,
   FlatList,
+  Animated,
 } from 'react-native';
+import { PinchGestureHandler, TapGestureHandler, PanGestureHandler, State, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { fetchStockData, formatDateForAPI, calculatePercentageChange } from './services/stockService';
@@ -26,6 +28,14 @@ export default function App() {
   const [sortColumn, setSortColumn] = useState(null);
   const [sortDirection, setSortDirection] = useState('asc'); // 'asc' or 'desc'
   const [searchText, setSearchText] = useState('');
+  
+  // Zoom and pan functionality
+  const scale = useRef(new Animated.Value(1)).current;
+  const translateX = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(0)).current;
+  const pinchRef = useRef();
+  const panRef = useRef();
+  const doubleTapRef = useRef();
 
   const onStartDateChange = (event, selectedDate) => {
     const currentDate = selectedDate || startDate;
@@ -202,6 +212,89 @@ export default function App() {
     setSearchText(text);
   }, []);
 
+  // Zoom gesture handlers
+  const onPinchGestureEvent = useCallback((event) => {
+    const { scale: newScale } = event.nativeEvent;
+    // Limit zoom between 0.5x and 3x
+    const clampedScale = Math.min(Math.max(newScale, 0.5), 3);
+    scale.setValue(clampedScale);
+  }, [scale]);
+
+  const onPinchStateChange = useCallback((event) => {
+    if (event.nativeEvent.oldState === State.ACTIVE) {
+      const { scale: newScale } = event.nativeEvent;
+      const clampedScale = Math.min(Math.max(newScale, 0.5), 3);
+      
+      Animated.spring(scale, {
+        toValue: clampedScale,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [scale]);
+
+  const onDoubleTap = useCallback((event) => {
+    if (event.nativeEvent.state === State.ACTIVE) {
+      // Reset zoom and pan to original position on double tap
+      lastPan.current = { x: 0, y: 0 };
+      Animated.parallel([
+        Animated.spring(scale, {
+          toValue: 1,
+          useNativeDriver: true,
+        }),
+        Animated.spring(translateX, {
+          toValue: 0,
+          useNativeDriver: true,
+        }),
+        Animated.spring(translateY, {
+          toValue: 0,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+  }, [scale, translateX, translateY]);
+
+  // Pan gesture handlers
+  const lastPan = useRef({ x: 0, y: 0 });
+  
+  const onPanGestureEvent = useCallback((event) => {
+    const { translationX, translationY } = event.nativeEvent;
+    translateX.setValue(lastPan.current.x + translationX);
+    translateY.setValue(lastPan.current.y + translationY);
+  }, [translateX, translateY]);
+
+  const onPanStateChange = useCallback((event) => {
+    if (event.nativeEvent.oldState === State.ACTIVE) {
+      const { translationX, translationY } = event.nativeEvent;
+      const newX = lastPan.current.x + translationX;
+      const newY = lastPan.current.y + translationY;
+      
+      // Apply bounds based on current zoom level
+      const screenWidth = Dimensions.get('window').width;
+      const screenHeight = Dimensions.get('window').height;
+      const currentScale = scale._value || 1;
+      
+      // Allow more panning when zoomed in
+      const maxTranslateX = screenWidth * 0.4 * currentScale;
+      const maxTranslateY = screenHeight * 0.3 * currentScale;
+      
+      const clampedX = Math.min(Math.max(newX, -maxTranslateX), maxTranslateX);
+      const clampedY = Math.min(Math.max(newY, -maxTranslateY), maxTranslateY);
+      
+      lastPan.current = { x: clampedX, y: clampedY };
+      
+      Animated.parallel([
+        Animated.spring(translateX, {
+          toValue: clampedX,
+          useNativeDriver: true,
+        }),
+        Animated.spring(translateY, {
+          toValue: clampedY,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+  }, [translateX, translateY, scale]);
+
   const tableHead = ['Stock Name', 'Changes (%)', 'Start Price', 'End Price'];
   
   // Create table header component
@@ -252,7 +345,7 @@ export default function App() {
   }, [tableColumnWidths]);
 
   return (
-    <View style={styles.container}>
+    <GestureHandlerRootView style={styles.container}>
       <StatusBar style="auto" />
       
       <View style={styles.header}>
@@ -336,37 +429,74 @@ export default function App() {
              Comparison Results ({sortedAndFilteredData.length} stocks
              {searchText ? ` filtered from ${stockData.length}` : ''})
            </Text>
-           <View style={styles.tableWrapper}>
-             {TableHeader}
-             <FlatList
-               data={sortedAndFilteredData || []}
-               renderItem={TableRow}
-               keyExtractor={(item, index) => `${item?.[0] || 'unknown'}-${index}`}
-               style={styles.tableDataScroll}
-               getItemLayout={(data, index) => ({
-                 length: 35,
-                 offset: 35 * index,
-                 index,
-               })}
-               removeClippedSubviews={true}
-               maxToRenderPerBatch={20}
-               updateCellsBatchingPeriod={50}
-               initialNumToRender={20}
-               windowSize={10}
-               showsVerticalScrollIndicator={true}
-             />
-           </View>
+           <Text style={styles.zoomHint}>
+             💡 Pinch to zoom • Drag to pan • Double tap to reset
+           </Text>
+           <TapGestureHandler
+             ref={doubleTapRef}
+             onHandlerStateChange={onDoubleTap}
+             numberOfTaps={2}
+           >
+             <PanGestureHandler
+               ref={panRef}
+               onGestureEvent={onPanGestureEvent}
+               onHandlerStateChange={onPanStateChange}
+               simultaneousHandlers={[pinchRef, doubleTapRef]}
+               minPointers={1}
+               maxPointers={1}
+             >
+               <PinchGestureHandler
+                 ref={pinchRef}
+                 onGestureEvent={onPinchGestureEvent}
+                 onHandlerStateChange={onPinchStateChange}
+                 simultaneousHandlers={[panRef, doubleTapRef]}
+               >
+                 <Animated.View 
+                   style={[
+                     styles.tableWrapper,
+                     {
+                       transform: [
+                         { translateX },
+                         { translateY },
+                         { scale }
+                       ]
+                     }
+                   ]}
+                 >
+                   {TableHeader}
+                   <FlatList
+                     data={sortedAndFilteredData || []}
+                     renderItem={TableRow}
+                     keyExtractor={(item, index) => `${item?.[0] || 'unknown'}-${index}`}
+                     style={styles.tableDataScroll}
+                     getItemLayout={(data, index) => ({
+                       length: 35,
+                       offset: 35 * index,
+                       index,
+                     })}
+                     removeClippedSubviews={true}
+                     maxToRenderPerBatch={20}
+                     updateCellsBatchingPeriod={50}
+                     initialNumToRender={20}
+                     windowSize={10}
+                     showsVerticalScrollIndicator={true}
+                     scrollEnabled={false}
+                   />
+                 </Animated.View>
+               </PinchGestureHandler>
+             </PanGestureHandler>
+           </TapGestureHandler>
          </View>
       ) : !loading && (
         <View style={styles.noDataContainer}>
           <Text style={styles.noDataText}>
             Select two dates and tap "Compare Stocks" to see results
           </Text>
-        </View>
-      )}
-    </View>
-  );
-}
+                 </View>
+       )}
+     </GestureHandlerRootView>
+   );
+ }
 
 const styles = StyleSheet.create({
   container: {
@@ -442,10 +572,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
     paddingTop: 15,
     paddingBottom: 0,
+    overflow: 'hidden', // Contain the zoomable content
   },
   tableWrapper: {
     width: '100%',
     flex: 1,
+    overflow: 'visible', // Allow content to extend beyond bounds when zoomed
   },
   tableHeaderRow: {
     flexDirection: 'row',
@@ -501,9 +633,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#333',
-    marginBottom: 10,
+    marginBottom: 5,
     textAlign: 'center',
     paddingHorizontal: 15,
+  },
+  zoomHint: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 10,
+    fontStyle: 'italic',
   },
   noDataContainer: {
     flex: 1,
