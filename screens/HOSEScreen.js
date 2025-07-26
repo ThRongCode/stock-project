@@ -51,16 +51,6 @@ export default function HOSEScreen() {
         
         if (result.success) {
           setCompanyMap(result.companyMap);
-          
-          // Debug MSB specifically
-          if (result.companyMap['MSB']) {
-            console.log('🔍 MSB found in company map:', result.companyMap['MSB']);
-          } else {
-            console.log('❌ MSB NOT found in company map');
-            console.log('🔍 Available company codes containing "MSB":', 
-              Object.keys(result.companyMap).filter(code => code.includes('MSB'))
-            );
-          }
         }
       } catch (error) {
         console.error('🏢 Error loading company info:', error);
@@ -152,23 +142,6 @@ export default function HOSEScreen() {
         // Get company name with improved fallback logic
         const companyName = getCompanyName(startStock.securitySymbol);
         const displayCompanyName = (companyName && companyName !== startStock.securitySymbol) ? companyName : '';
-        
-        // Debug MSB specifically
-        if (startStock.securitySymbol === 'MSB') {
-          console.log('🔍 MSB debugging during comparison:', {
-            stockCode: startStock.securitySymbol,
-            rawCompanyName: companyName,
-            displayCompanyName,
-            companyMapHasMSB: !!companyMap['MSB'],
-            companyMapMSB: companyMap['MSB'] || 'NOT FOUND',
-            isCompanyMapEmpty: Object.keys(companyMap).length === 0,
-            conditionCheck: {
-              hasCompanyName: !!companyName,
-              companyNameNotEqualToStockCode: companyName !== startStock.securitySymbol,
-              fullCondition: !!(companyName && companyName !== startStock.securitySymbol)
-            }
-          });
-        }
         
         result.push([
           startStock.securitySymbol, // Stock Code
@@ -550,7 +523,7 @@ export default function HOSEScreen() {
 
   // Regular row component (gestures will be at FlatList level)
   const SimpleTableRow = useCallback(({ item, index }) => {
-    if (!item || !Array.isArray(item) || item.length < 5) {
+    if (!item || !Array.isArray(item) || item.length < 4) {
       return null;
     }
 
@@ -574,7 +547,7 @@ export default function HOSEScreen() {
           <Text style={styles.tableText}>{item[3] || ''}</Text>
         </View>
         <View style={[styles.tableCell, { width: tableColumnWidths[4] }]}>
-          <Text style={styles.tableText} numberOfLines={2}>
+          <Text style={[styles.tableText, styles.companyNameText]} numberOfLines={0}>
             {item[4] || ''}
           </Text>
         </View>
@@ -649,16 +622,11 @@ export default function HOSEScreen() {
                     </View>
                   ) : null}
                   contentContainerStyle={styles.flatListContent}
-                  getItemLayout={(data, index) => ({
-                    length: 35,
-                    offset: 35 * index,
-                    index,
-                  })}
                   removeClippedSubviews={true}
-                  maxToRenderPerBatch={20}
+                  maxToRenderPerBatch={10}
                   updateCellsBatchingPeriod={50}
-                  initialNumToRender={20}
-                  windowSize={10}
+                  initialNumToRender={10}
+                  windowSize={5}
                   showsVerticalScrollIndicator={true}
                   scrollEnabled={currentScale <= 1.1}
                   keyboardShouldPersistTaps="handled"
@@ -790,17 +758,17 @@ const styles = StyleSheet.create({
   },
   tableDataRow: {
     flexDirection: 'row',
-    height: 35,
     borderBottomWidth: 0.5,
     borderBottomColor: '#ddd',
+    minHeight: 35, // Minimum height for rows with short content
   },
   tableCell: {
-    height: 35,
     justifyContent: 'center',
     alignItems: 'center',
     borderRightWidth: 0.5,
     borderRightColor: '#ddd',
     paddingHorizontal: 4,
+    paddingVertical: 8, // Add vertical padding for better spacing
   },
   evenRow: {
     backgroundColor: '#ffffff',
@@ -907,5 +875,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#4CAF50',
     fontWeight: '600',
+  },
+  companyNameText: {
+    fontSize: 12,
+    color: '#555',
+    textAlign: 'left',
+    paddingHorizontal: 8, // Add more horizontal padding for company names
+    flexWrap: 'wrap', // Enable text wrapping
   },
 }); 

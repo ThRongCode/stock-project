@@ -72,28 +72,9 @@ export const fetchHSXCompanyInfo = async () => {
             sector: company.sector || company.sectorName || '',
             industry: company.industry || company.industryName || ''
           };
-          
-          // Debug MSB specifically
-          if (code === 'MSB') {
-            console.log('🔍 MSB found in API response:', {
-              rawCompany: company,
-              mappedData: companyMap[code]
-            });
-          }
         }
       }
     });
-
-    // Check if MSB was found in the results
-    if (!companyMap['MSB']) {
-      console.log('🔍 MSB debugging - searching all company objects for MSB:');
-      const msbResults = dataArray.filter(company => 
-        (company.code && company.code.includes('MSB')) ||
-        (company.name && company.name.toLowerCase().includes('msb')) ||
-        (company.brief && company.brief.toLowerCase().includes('msb'))
-      );
-      console.log('🔍 Companies containing "MSB":', msbResults);
-    }
 
     return {
       success: true,
