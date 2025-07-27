@@ -31,7 +31,7 @@
     "description": "Vietnamese Stock Market Comparison App for HOSE and HNX exchanges",
     "extra": {
       "eas": {
-        "projectId": "1103f429"
+        "projectId": "1103f429-ccee-481e-bbb7-733ddc437a36"
       }
     },
     "owner": "throng"
