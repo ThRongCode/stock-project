@@ -18,6 +18,13 @@ import { StatusBar } from 'expo-status-bar';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { fetchStockData, formatDateForAPI, calculatePercentageChange, fetchHSXCompanyInfo } from '../services/stockService';
 
+// VN30 static array
+const VN30_STOCKS = [
+  'ACB', 'BCM', 'BID', 'BVH', 'CTG', 'FPT', 'GAS', 'GVR', 'HDB', 'HPG',
+  'LPB', 'MBB', 'MSN', 'MWG', 'PLX', 'SAB', 'SHB', 'SSB', 'SSI', 'STB',
+  'TCB', 'TPB', 'VCB', 'VHM', 'VIC', 'VJC', 'VNM', 'VPB', 'VRE'
+];
+
 export default function HOSEScreen() {
   const [startDate, setStartDate] = useState(new Date(2025, 6, 24)); // July 24, 2025
   const [endDate, setEndDate] = useState(new Date(2025, 6, 25)); // July 25, 2025
@@ -28,6 +35,7 @@ export default function HOSEScreen() {
   const [sortColumn, setSortColumn] = useState(null);
   const [sortDirection, setSortDirection] = useState('asc'); // 'asc' or 'desc'
   const [searchText, setSearchText] = useState('');
+  const [showVN30Only, setShowVN30Only] = useState(false); // VN30 filter state
   
   // Company info state
   const [companyMap, setCompanyMap] = useState({});
@@ -173,19 +181,25 @@ export default function HOSEScreen() {
   }, [sortColumn, sortDirection]);
 
   const filteredData = useMemo(() => {
-    if (!searchText.trim()) {
-      return stockData;
+    let filtered = stockData;
+
+    if (showVN30Only) {
+      filtered = filtered.filter(row => VN30_STOCKS.includes(row[0]));
     }
-    
-    return stockData.filter(row => {
-      const stockCode = row[0].toLowerCase(); // Stock code is in the first column
-      const companyName = (row[4] || '').toLowerCase(); // Company name is in the fifth column
-      const searchTerm = searchText.toLowerCase();
-      
-      // Search in both stock code and company name
-      return stockCode.includes(searchTerm) || companyName.includes(searchTerm);
-    });
-  }, [stockData, searchText]);
+
+    if (searchText.trim()) {
+      filtered = filtered.filter(row => {
+        const stockCode = row[0].toLowerCase(); // Stock code is in the first column
+        const companyName = (row[4] || '').toLowerCase(); // Company name is in the fifth column
+        const searchTerm = searchText.toLowerCase();
+        
+        // Search in both stock code and company name
+        return stockCode.includes(searchTerm) || companyName.includes(searchTerm);
+      });
+    }
+
+    return filtered;
+  }, [stockData, searchText, showVN30Only]);
 
   const sortedAndFilteredData = useMemo(() => {
     if (!sortColumn || filteredData.length === 0) {
@@ -473,6 +487,25 @@ export default function HOSEScreen() {
         />
       </View>
 
+      {/* VN30 Filter */}
+      <View style={styles.filterContainer}>
+        <TouchableOpacity
+          style={[
+            styles.filterButton,
+            showVN30Only && styles.filterButtonActive
+          ]}
+          onPress={() => setShowVN30Only(!showVN30Only)}
+          activeOpacity={0.7}
+        >
+          <Text style={[
+            styles.filterButtonText,
+            showVN30Only && styles.filterButtonTextActive
+          ]}>
+            {showVN30Only ? 'Show All Stocks' : 'Show Only VN30'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Fetch Button */}
       <TouchableOpacity
         style={[
@@ -506,7 +539,8 @@ export default function HOSEScreen() {
         <View style={styles.resultsHeader}>
           <Text style={styles.resultsTitle}>
             Comparison Results ({sortedAndFilteredData.length} stocks
-            {searchText ? ` filtered from ${stockData.length}` : ''})
+            {searchText || showVN30Only ? ` filtered from ${stockData.length}` : ''}
+            {showVN30Only ? ' • VN30 Only' : ''})
           </Text>
           <Text style={styles.zoomHint}>
             💡 Pinch to zoom • {currentScale > 1.1 ? 'Drag to pan' : 'Scroll normally'} • Double tap to reset
@@ -518,7 +552,7 @@ export default function HOSEScreen() {
   ), [
     startDate, endDate, showStartPicker, showEndPicker, 
     searchText, loading, stockData.length, sortedAndFilteredData.length, 
-    currentScale, TableHeader, companyInfoLoading, companyMap
+    currentScale, TableHeader, companyInfoLoading, companyMap, showVN30Only
   ]);
 
   // Regular row component (gestures will be at FlatList level)
@@ -705,6 +739,30 @@ const styles = StyleSheet.create({
     padding: 12,
     fontSize: 16,
     color: '#333',
+  },
+  filterContainer: {
+    marginHorizontal: 20,
+    marginBottom: 15,
+  },
+  filterButton: {
+    backgroundColor: '#e0e0e0',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    alignItems: 'center',
+  },
+  filterButtonActive: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  filterButtonText: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '600',
+  },
+  filterButtonTextActive: {
+    color: 'white',
   },
   fetchButton: {
     backgroundColor: '#007AFF',
