@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "stock-project",
+    "name": "Stock Project",
     "slug": "stock-project",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -13,17 +13,21 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.stockproject.app"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.stockproject.app"
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "platforms": ["ios", "android"],
+    "description": "Vietnamese Stock Market Comparison App for HOSE and HNX exchanges"
   }
 }
