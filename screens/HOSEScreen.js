@@ -143,8 +143,9 @@ export default function HOSEScreen() {
     startData.forEach((startStock, index) => {
       const endStock = endDataMap[startStock.securitySymbol];
       if (endStock) {
-        const startPrice = parseFloat(startStock.closePrice);
-        const endPrice = parseFloat(endStock.closePrice);
+        // Use priorClosePrice as fallback when closePrice is 0
+        const startPrice = parseFloat(startStock.closePrice) || parseFloat(startStock.priorClosePrice) || 0;
+        const endPrice = parseFloat(endStock.closePrice) || parseFloat(endStock.priorClosePrice) || 0;
         const changePercent = calculatePercentageChange(startPrice, endPrice);
         
         // Get company name with improved fallback logic
