@@ -21,6 +21,7 @@
     "@react-navigation/drawer": "^7.5.5",
     "@react-navigation/native": "^7.1.16",
     "expo": "~53.0.20",
+    "expo-dev-client": "^5.2.4",
     "expo-status-bar": "~2.2.3",
     "graphql": "^16.11.0",
     "react": "19.0.0",
